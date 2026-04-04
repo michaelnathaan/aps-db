@@ -41,7 +41,7 @@ INSERT INTO users (full_name, phone_number, role, is_verified_tenant, unit_numbe
 INSERT INTO users (full_name, phone_number, role, is_verified_tenant, unit_number)
 SELECT 
     'Tenant ' || gs.n,
-    '+628' || LPAD((1234567822 + gs.n)::TEXT, 10, '0'),
+    '+6289' || LPAD((100000000 + gs.n)::TEXT, 9, '0'),
     'tenant',
     TRUE,
     (1700 + gs.n)::TEXT

@@ -19,9 +19,9 @@ services:
       - ./migrations/003_create_bookings_table.sql:/docker-entrypoint-initdb.d/003_create_bookings_table.sql:ro
       - ./migrations/004_create_indexes.sql:/docker-entrypoint-initdb.d/004_create_indexes.sql:ro
       # Uncomment after first successful migration to seed data
-      # - ./seeds/001_users.sql:/docker-entrypoint-initdb.d/005_seed_users.sql:ro
-      # - ./seeds/002_facilities.sql:/docker-entrypoint-initdb.d/006_seed_facilities.sql:ro
-      # - ./seeds/003_bookings.sql:/docker-entrypoint-initdb.d/007_seed_bookings.sql:ro
+      - ./seeds/001_users.sql:/docker-entrypoint-initdb.d/005_seed_users.sql:ro
+      - ./seeds/002_facilities.sql:/docker-entrypoint-initdb.d/006_seed_facilities.sql:ro
+      - ./seeds/003_bookings.sql:/docker-entrypoint-initdb.d/007_seed_bookings.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s

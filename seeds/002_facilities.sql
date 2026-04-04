@@ -44,7 +44,7 @@ INSERT INTO facilities (name, description, price_per_hour, open_time, close_time
 (
     'Swimming Pool',
     'Olympic-size swimming pool. Includes changing rooms and shower facilities. Lifeguard on duty during operating hours.',
-    0,
+    50000,
     '06:00:00',
     '20:00:00',
     TRUE
@@ -52,11 +52,11 @@ INSERT INTO facilities (name, description, price_per_hour, open_time, close_time
 (
     'Gym',
     'Fully equipped fitness center with cardio machines, free weights, and strength training equipment.',
-    0,
+    50000,
     '05:00:00',
     '23:00:00',
     TRUE
-),
+);
 
 -- Verify seed data
 SELECT 
