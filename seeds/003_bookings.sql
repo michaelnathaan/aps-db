@@ -21,103 +21,61 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- ==================== EXPLICIT BOOKINGS FIRST ====================
-INSERT INTO bookings (user_id, facility_id, booking_date, start_time, end_time, status, total_price)
-VALUES
-    (3,  1, CURRENT_DATE, '07:00:00', '08:00:00', 'confirmed', 0),
-    (15, 1, CURRENT_DATE, '08:00:00', '09:00:00', 'confirmed', 0),
-    (23, 1, CURRENT_DATE, '16:00:00', '17:00:00', 'confirmed', 50000),
-    (5,  2, CURRENT_DATE, '10:00:00', '14:00:00', 'confirmed', 0),
-    (7,  4, CURRENT_DATE, '09:00:00', '11:00:00', 'confirmed', 0),
-    (25, 4, CURRENT_DATE, '14:00:00', '16:00:00', 'pending', 150000),
-    (10, 4, CURRENT_DATE, '17:00:00', '21:00:00', 'confirmed', 0),
-
-    (4,  1, CURRENT_DATE + 1, '06:00:00', '07:00:00', 'confirmed', 0),
-    (6,  1, CURRENT_DATE + 1, '18:00:00', '19:00:00', 'confirmed', 0),
-    (8,  3, CURRENT_DATE + 1, '18:00:00', '23:00:00', 'confirmed', 0),
-    (12, 4, CURRENT_DATE + 1, '09:00:00', '10:00:00', 'confirmed', 0),
-    (14, 5, CURRENT_DATE + 1, '14:00:00', '15:00:00', 'confirmed', 0),
-
-    (9,  1, CURRENT_DATE + 2, '07:00:00', '08:00:00', 'pending', 0),
-    (11, 2, CURRENT_DATE + 2, '15:00:00', '18:00:00', 'confirmed', 0),
-    (13, 2, CURRENT_DATE + 2, '18:00:00', '21:00:00', 'confirmed', 0)
-ON CONFLICT DO NOTHING;
-
--- ==================== RANDOM BOOKINGS 1 ====================
+-- 2. Generate 10,000 Past Bookings
 INSERT INTO bookings (user_id, facility_id, booking_date, start_time, end_time, status, total_price)
 SELECT 
-    user_id, facility_id, booking_date, start_time, 
-    start_time + duration AS end_time, 
-    status, 0
+    user_id, 
+    facility_id, 
+    past_date, 
+    start_t, 
+    start_t + duration AS end_t, 
+    status, 
+    0 -- Temporary 0, will update in next step
 FROM (
     SELECT 
+        -- Randomly pick a user (70% chance of being a tenant)
         (CASE WHEN random() < 0.7 THEN 
             (SELECT id FROM users WHERE role = 'tenant' ORDER BY random() LIMIT 1)
          ELSE 
             (SELECT id FROM users WHERE role = 'guest' ORDER BY random() LIMIT 1)
          END) AS user_id,
 
+        -- Randomly pick a facility
         (SELECT id FROM facilities ORDER BY random() LIMIT 1) AS facility_id,
 
-        (CURRENT_DATE + FLOOR(random() * 3)::int * INTERVAL '1 day')::DATE AS booking_date,
+        -- Dates strictly BETWEEN 1 year ago and 1 day ago
+        (CURRENT_DATE - (FLOOR(random() * 364 + 1)::int * INTERVAL '1 day'))::DATE AS past_date,
 
-        (TIME '06:00:00' + FLOOR(random() * 13)::int * INTERVAL '1 hour') AS start_time,
+        -- Random start time between 06:00 and 18:00
+        (TIME '06:00:00' + FLOOR(random() * 12)::int * INTERVAL '1 hour') AS start_t,
 
+        -- Random duration between 1 and 4 hours
         ((FLOOR(random() * 4)::int + 1) * INTERVAL '1 hour') AS duration,
 
+        -- Past status distribution
         (CASE 
-            WHEN random() < 0.8 THEN 'confirmed'
-            WHEN random() < 0.9 THEN 'cancelled'
+            WHEN random() < 0.85 THEN 'confirmed'
+            WHEN random() < 0.95 THEN 'cancelled'
             ELSE 'expired'
          END)::booking_status AS status
-    FROM generate_series(1, 200)
+    FROM generate_series(1, 13000)
 ) t
-WHERE start_time + duration <= TIME '23:00:00'
-  AND start_time < start_time + duration
+WHERE start_t + duration <= TIME '23:00:00'
 ON CONFLICT DO NOTHING;
 
--- ==================== RANDOM BOOKINGS 2 (Future) ====================
-INSERT INTO bookings (user_id, facility_id, booking_date, start_time, end_time, status, total_price)
-SELECT 
-    user_id, facility_id, booking_date, start_time, 
-    start_time + duration AS end_time, 
-    status, 0
-FROM (
-    SELECT 
-        (CASE WHEN random() < 0.7 THEN 
-            (SELECT id FROM users WHERE role = 'tenant' ORDER BY random() LIMIT 1)
-         ELSE 
-            (SELECT id FROM users WHERE role = 'guest' ORDER BY random() LIMIT 1)
-         END) AS user_id,
-
-        (SELECT id FROM facilities ORDER BY random() LIMIT 1) AS facility_id,
-
-        (CURRENT_DATE + (FLOOR(random() * 3 + 1)::int) * INTERVAL '1 day')::DATE AS booking_date,
-
-        (TIME '06:00:00' + FLOOR(random() * 13)::int * INTERVAL '1 hour') AS start_time,
-
-        ((FLOOR(random() * 4)::int + 1) * INTERVAL '1 hour') AS duration,
-
-        (CASE WHEN random() < 0.7 THEN 'confirmed' ELSE 'pending' END)::booking_status AS status
-    FROM generate_series(1, 100)
-) t
-WHERE start_time + duration <= TIME '23:00:00'
-ON CONFLICT DO NOTHING;
-
--- Calculate prices
+-- 3. Bulk calculate prices for the new data
 UPDATE bookings 
 SET total_price = calculate_booking_price(user_id, facility_id, start_time, end_time)
 WHERE total_price = 0;
 
+-- 4. Cleanup
 DROP FUNCTION calculate_booking_price(INTEGER, INTEGER, TIME, TIME);
 
--- Summary
+-- 5. Final Verification
 SELECT 
     status,
-    COUNT(*) as count,
-    COUNT(*) FILTER (WHERE booking_date < CURRENT_DATE) as past,
-    COUNT(*) FILTER (WHERE booking_date = CURRENT_DATE) as today,
-    COUNT(*) FILTER (WHERE booking_date > CURRENT_DATE) as future
+    COUNT(*) as total_rows,
+    MIN(booking_date) as oldest_record,
+    MAX(booking_date) as newest_record
 FROM bookings 
-GROUP BY status 
-ORDER BY status;
+GROUP BY status;

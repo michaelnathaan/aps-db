@@ -26,9 +26,9 @@ CREATE TABLE IF NOT EXISTS bookings (
     
     CONSTRAINT valid_time_range CHECK (start_time < end_time),
     CONSTRAINT price_non_negative CHECK (total_price >= 0),
-    CONSTRAINT future_or_today_booking CHECK (booking_date >= CURRENT_DATE),
-    CONSTRAINT max_3_days_advance CHECK (
-        booking_date <= CURRENT_DATE + INTERVAL '3 days'
+    -- CONSTRAINT future_or_today_booking CHECK (booking_date >= CURRENT_DATE),
+    CONSTRAINT max_7_days_advance CHECK (
+        booking_date <= CURRENT_DATE + INTERVAL '7 days'
     )
 );
 
