@@ -1,207 +1,254 @@
 # APS Database (aps-db)
 
-PostgreSQL database for the Apartment Booking System (APS).
-This repository contains only the database layer: schema, seed data, and Docker setup.
+PostgreSQL database layer for the Apartment Booking System. This repository contains the database schema, seed dataset, Docker Compose setup, and Windows helper scripts used by the `aps-be` REST versus GraphQL backend experiment.
 
----
+The database is intentionally separated from the backend so REST and GraphQL can be tested against the same schema and seed data under controlled conditions.
 
-## Overview
+## Project Scope
 
 This repository provides:
 
-* PostgreSQL schema (SQL migrations)
-* Optional seed data for testing
-* Docker Compose configuration
-* Basic database management scripts
+- PostgreSQL 16 database service.
+- pgAdmin web UI for database inspection.
+- Ordered SQL migrations for APS users, facilities, bookings, constraints, triggers, and indexes.
+- Seed data for local development and benchmark reproduction.
+- Windows batch scripts for initializing, resetting, and reseeding the database.
 
-The database is intended to be reusable by multiple backends (e.g., REST or GraphQL), but this repository focuses **only on the database itself**.
+The API implementation and load-test runner live in the sibling `aps-be` project.
 
----
+## Schema Overview
 
-## Schema
+| Table | Purpose |
+|-------|---------|
+| `users` | User accounts, phone-number login identity, roles, tenant verification, and unit numbers |
+| `facilities` | Bookable apartment facilities, pricing, operating hours, and active status |
+| `bookings` | Facility reservations, status, date and time range, price, and relationships to users and facilities |
 
-### Tables
+Important schema behavior:
 
-| Table        | Description             |
-| ------------ | ----------------------- |
-| `users`      | User accounts and roles |
-| `facilities` | Bookable facilities     |
-| `bookings`   | Facility reservations   |
+- `user_role` enum: `guest`, `tenant`, `admin`, `super_admin`.
+- `booking_status` enum: `pending`, `confirmed`, `expired`, `cancelled`.
+- Foreign keys prevent deleting users or facilities that are still referenced by bookings.
+- CHECK constraints validate phone numbers, tenant unit requirements, non-negative prices, valid operating hours, booking time ranges, and maximum advance booking date.
+- `updated_at` timestamps are maintained by triggers.
+- Indexes support login lookup, role filters, active facility lookup, booking history, availability checks, conflict detection, and daily booking-count validation.
+- A partial unique index prevents duplicate active bookings for the same facility, date, start time, and end time while excluding `cancelled` and `expired` bookings.
 
-### Design Notes
+## Seed Dataset
 
-* Foreign key constraints are enforced
-* Business rules are implemented using CHECK constraints
-* Indexes are added for common query patterns
-* Booking conflicts are prevented using a partial unique index
-* Timestamps are automatically maintained
+The seed files create a reproducible local dataset for development and load testing:
 
----
+- `seeds/001_users.sql` truncates and loads administrative users, tenants, guests, and generated benchmark users.
+- `seeds/002_facilities.sql` truncates and loads seven facilities: Tennis Court, Function Hall, Ballroom, Meeting Room A, Meeting Room B, Swimming Pool, and Gym.
+- `seeds/003_bookings.sql` truncates and generates historical booking records, then calculates prices based on tenant status and facility pricing.
 
-## Quick Start (Windows)
+The backend k6 tests depend on the seeded phone numbers and user IDs defined here. Keep this dataset stable when comparing REST and GraphQL results across runs.
 
-### Prerequisites
+## Prerequisites
 
-* Docker Desktop for Windows
-* Docker Compose (included with Docker Desktop)
-* PostgreSQL client (optional, e.g. psql via pgAdmin)
+- Docker Desktop or Docker Engine.
+- Docker Compose v2 (`docker compose`) or the legacy `docker-compose` command.
+- Optional: `psql`, DBeaver, DataGrip, or another PostgreSQL client.
 
----
+## Environment
 
-### 1. Environment Setup
+The Compose file reads configuration from `.env`. The local development defaults are:
 
-```powershell
-copy .env.example .env
+```env
+POSTGRES_PORT=5432
+POSTGRES_USER=apsadmin
+POSTGRES_DB=apartment_booking
+POSTGRES_PASSWORD=adminpassword
+POSTGRES_HOST=postgres
+
+PGADMIN_PORT=5050
+PGADMIN_DEFAULT_EMAIL=admin@gmail.com
+PGADMIN_DEFAULT_PASSWORD=adminpassword
 ```
 
-Edit `.env` if needed. Default values work for local development.
+These values are suitable for a local research environment only. Replace passwords before using the setup anywhere outside local development.
 
----
+## Quick Start
 
-### 2. Start the Database
+From the `aps-db` directory:
 
-```powershell
-docker-compose up -d
+```bash
+docker compose up -d
+docker compose ps
 ```
 
-Check container status:
+On first initialization, PostgreSQL executes the mounted files in alphabetical order:
 
-```powershell
-docker-compose ps
+```text
+001_create_users_table.sql
+002_create_facilities_table.sql
+003_create_bookings_table.sql
+004_create_indexes.sql
+005_seed_users.sql
+006_seed_facilities.sql
+007_seed_bookings.sql
 ```
 
-On first startup, PostgreSQL will automatically execute migration files mounted into the container.
+Because the seed files are currently mounted in `docker-compose.yml`, a new database volume is created with both schema and seed data already loaded.
 
----
+Verify the database:
 
-### 3. Seed Data (Optional)
-
-If you want test data:
-
-```powershell
-docker-compose exec postgres psql -U apsadmin -d apartment_booking -f /docker-entrypoint-initdb.d/seeds/001_users.sql
-docker-compose exec postgres psql -U apsadmin -d apartment_booking -f /docker-entrypoint-initdb.d/seeds/002_facilities.sql
-docker-compose exec postgres psql -U apsadmin -d apartment_booking -f /docker-entrypoint-initdb.d/seeds/003_bookings.sql
+```bash
+docker compose exec postgres psql -U apsadmin -d apartment_booking -c "\dt"
+docker compose exec postgres psql -U apsadmin -d apartment_booking -c "SELECT COUNT(*) FROM users;"
+docker compose exec postgres psql -U apsadmin -d apartment_booking -c "SELECT COUNT(*) FROM facilities;"
+docker compose exec postgres psql -U apsadmin -d apartment_booking -c "SELECT COUNT(*) FROM bookings;"
 ```
 
-Note:
+## Accessing PostgreSQL
 
-* Seed data should typically be applied **once**
-* Do not reseed production databases
+Use `psql` through Docker:
 
----
-
-### 4. Verify Database
-
-```powershell
-docker-compose exec postgres psql -U apsadmin -d apartment_booking
+```bash
+docker compose exec postgres psql -U apsadmin -d apartment_booking
 ```
 
-Inside `psql`:
+Connection details for external tools:
 
-```sql
-\dt
-SELECT COUNT(*) FROM users;
-SELECT COUNT(*) FROM facilities;
-SELECT COUNT(*) FROM bookings;
-```
-
-Exit:
-
-```sql
-\q
-```
-
----
-
-## Accessing the Database
-
-### Option 1: psql via Docker
-
-```powershell
-docker-compose exec postgres psql -U apsadmin -d apartment_booking
-```
-
----
-
-### Option 2: pgAdmin (Web UI)
-
-1. Open: [http://localhost:5050](http://localhost:5050)
-2. Login:
-
-   * Email: `admin@aps.local`
-   * Password: `admin123`
-3. Register Server:
-
-   * Host name: `postgres`
-   * Port: `5432`
-   * Database: `apartment_booking`
-   * Username: `apsadmin`
-   * Password: value from `.env`
-
----
-
-### Option 3: External Database Tools
-
-Connection details:
-
-```
+```text
 Host: localhost
 Port: 5432
 Database: apartment_booking
 Username: apsadmin
-Password: (from .env)
+Password: adminpassword
 ```
 
-Works with tools like pgAdmin Desktop, DBeaver, or DataGrip.
+For backend containers on the Docker network, use:
 
----
+```text
+Host: aps-postgres
+Port: 5432
+Database: apartment_booking
+Username: apsadmin
+Password: adminpassword
+```
 
-## Common Queries
+## pgAdmin
 
-### User Role Distribution
+Open pgAdmin at:
+
+```text
+http://localhost:5050
+```
+
+Login:
+
+```text
+Email: admin@gmail.com
+Password: adminpassword
+```
+
+Register the PostgreSQL server with:
+
+```text
+Host name/address: postgres
+Port: 5432
+Maintenance database: apartment_booking
+Username: apsadmin
+Password: adminpassword
+```
+
+## Windows Helper Scripts
+
+The `scripts/` directory contains Windows batch helpers:
+
+| Script | Purpose |
+|--------|---------|
+| `scripts\init-db.bat` | Runs all files in `migrations\*.sql` against the running `aps-postgres` container |
+| `scripts\seed-db.bat` | Runs all files in `seeds\*.sql` and prints a summary |
+| `scripts\reset-db.bat` | Drops and recreates the configured database, then instructs you to rerun migrations and seeds |
+
+Run these from the `aps-db` directory after the PostgreSQL container is running.
+
+Important: the seed files use `TRUNCATE ... CASCADE` and are intended for local/test data. Do not run them against a database whose data must be preserved.
+
+## Resetting the Database
+
+The most reliable full reset is to remove the Docker volume and start again:
+
+```bash
+docker compose down -v
+docker compose up -d
+```
+
+This destroys all existing database and pgAdmin volume data, then replays migrations and mounted seeds from scratch.
+
+On Windows, the helper workflow is:
+
+```bat
+scripts\reset-db.bat
+scripts\init-db.bat
+scripts\seed-db.bat
+```
+
+Use the Docker volume reset when you want the exact same first-start behavior as a new machine.
+
+## Relationship to aps-be
+
+The backend Compose file in `aps-be` joins the external Docker network created by this database project:
+
+```text
+aps-db_aps-network
+```
+
+Start this database project before starting `aps-be`:
+
+```bash
+cd aps-db
+docker compose up -d
+
+cd ../aps-be
+docker compose up -d --build
+```
+
+The backend `.env` should point to:
+
+```env
+DB_HOST=aps-postgres
+DB_PORT=5432
+DB_USER=apsadmin
+DB_PASSWORD=adminpassword
+DB_NAME=apartment_booking
+DATABASE_URL=postgresql://apsadmin:adminpassword@aps-postgres:5432/apartment_booking
+```
+
+## Useful Queries
+
+User role distribution:
 
 ```sql
 SELECT role, is_verified_tenant, COUNT(*)
 FROM users
-GROUP BY role, is_verified_tenant;
+GROUP BY role, is_verified_tenant
+ORDER BY role, is_verified_tenant;
 ```
 
----
-
-### Booking Status Distribution
+Booking status distribution:
 
 ```sql
 SELECT status, COUNT(*)
 FROM bookings
-GROUP BY status;
+GROUP BY status
+ORDER BY status;
 ```
 
----
-
-### Today’s Bookings
+Facility list:
 
 ```sql
-SELECT 
-    b.id,
-    u.full_name,
-    f.name AS facility,
-    b.start_time,
-    b.end_time,
-    b.status
-FROM bookings b
-JOIN users u ON b.user_id = u.id
-JOIN facilities f ON b.facility_id = f.id
-WHERE b.booking_date = CURRENT_DATE
-ORDER BY b.start_time;
+SELECT id, name, price_per_hour, open_time, close_time, is_active
+FROM facilities
+ORDER BY id;
 ```
 
----
-
-### Detect Booking Conflicts (Expected Result: 0 rows)
+Detect overlapping active bookings:
 
 ```sql
-SELECT 
+SELECT
     b1.facility_id,
     b1.booking_date,
     b1.start_time,
@@ -213,78 +260,55 @@ JOIN bookings b2
   ON b1.facility_id = b2.facility_id
  AND b1.booking_date = b2.booking_date
  AND b1.id <> b2.id
-WHERE 
-    b1.status NOT IN ('cancelled', 'expired')
- AND b2.status NOT IN ('cancelled', 'expired')
- AND (b1.start_time, b1.end_time)
-     OVERLAPS (b2.start_time, b2.end_time);
+WHERE b1.status NOT IN ('cancelled', 'expired')
+  AND b2.status NOT IN ('cancelled', 'expired')
+  AND (b1.start_time, b1.end_time) OVERLAPS (b2.start_time, b2.end_time);
 ```
 
----
+Use this query as a diagnostic when validating the seed data. The database-level unique index prevents exact duplicate active slots; overlapping ranges with different start and end times should be evaluated according to the experiment assumptions and application-level booking rules.
 
 ## Directory Structure
 
-```
+```text
 aps-db/
-├── migrations/           # Database schema (run in order)
-│   ├── 001_create_users_table.sql
-│   ├── 002_create_facilities_table.sql
-│   ├── 003_create_bookings_table.sql
-│   └── 004_create_indexes.sql
-├── seeds/                # Optional test data
-│   ├── 001_users.sql
-│   ├── 002_facilities.sql
-│   └── 003_bookings.sql
-├── docker-compose.yml    # PostgreSQL + pgAdmin
-├── .env.example          # Environment template
-└── README.md             # Documentation
+  migrations/
+    001_create_users_table.sql
+    002_create_facilities_table.sql
+    003_create_bookings_table.sql
+    004_create_indexes.sql
+  seeds/
+    001_users.sql
+    002_facilities.sql
+    003_bookings.sql
+  scripts/
+    init-db.bat
+    reset-db.bat
+    seed-db.bat
+  docker-compose.yml
+  .env
+  README.md
 ```
-
----
-
-## Resetting the Database (Destructive)
-
-```powershell
-docker-compose down -v
-docker-compose up -d
-```
-
-This removes all data volumes and recreates the database from scratch.
-
----
 
 ## Troubleshooting
 
-### Database Container Not Running
+Check running services:
 
-```powershell
-docker-compose logs postgres
+```bash
+docker compose ps
 ```
 
----
+Read PostgreSQL logs:
 
-### Connection Issues
-
-```powershell
-docker-compose ps
+```bash
+docker compose logs postgres
 ```
 
-Ensure port `5432` is not used by another PostgreSQL installation on Windows.
+Confirm tables exist:
 
----
-
-### Migration Issues
-
-```powershell
-docker-compose exec postgres psql -U apsadmin -d apartment_booking -c "\dt"
+```bash
+docker compose exec postgres psql -U apsadmin -d apartment_booking -c "\dt"
 ```
 
-If needed, reset the database using `docker-compose down -v`.
+If port `5432` is already used by another local PostgreSQL installation, change `POSTGRES_PORT` in `.env` and restart the Compose stack.
 
----
-
-## License
-
-MIT License
-
----
+If migrations or seed files do not appear to run, remember that `/docker-entrypoint-initdb.d` files only run automatically when the PostgreSQL data volume is empty. Use `docker compose down -v` before recreating the database from scratch.
