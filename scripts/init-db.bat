@@ -19,7 +19,7 @@ if exist .env (
     echo WARNING: .env file not found. Using defaults.
     set POSTGRES_USER=apsadmin
     set POSTGRES_PASSWORD=adminpassword
-    set POSTGRES_DB=aps_db
+    set POSTGRES_DB=apartment_booking
     set POSTGRES_HOST=localhost
     set POSTGRES_PORT=5432
 )

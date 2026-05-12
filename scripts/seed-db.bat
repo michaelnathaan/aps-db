@@ -17,7 +17,7 @@ if exist .env (
 ) else (
     set POSTGRES_USER=apsadmin
     set POSTGRES_PASSWORD=adminpassword
-    set POSTGRES_DB=aps_db
+    set POSTGRES_DB=apartment_booking
 )
 
 echo Database: %POSTGRES_DB%
